@@ -10,6 +10,7 @@ from app.utils.customer_manager import CustomerManager
 from app.utils.context_manager import ContextManager
 from app.utils.openai_client import OpenAIClient
 from app.utils.conversation_manager import ConversationManager
+from app.utils.company_kb_manager import CompanyKBManager
 from app.models.customer import Customer
 from pydantic import ValidationError
 from datetime import datetime, timezone
@@ -24,6 +25,7 @@ customer_manager = CustomerManager()
 context_manager = ContextManager()
 openai_client = OpenAIClient()
 conversation_manager = ConversationManager()
+company_kb_manager = CompanyKBManager()
 
 
 # Helper function to wait for a message with a timeout
@@ -34,9 +36,14 @@ async def wait_for_message_with_timeout(websocket: WebSocket, timeout: int = ses
 async def websocket_chat(websocket: WebSocket):
     await websocket.accept()
 
+    # Step 0: Company selection before phone number
+    await websocket.send_text("Select company for this session:")
+
+    company_id = await wait_for_message_with_timeout(websocket)
+
+    # Step 1: Phone number input
     await websocket.send_text("Welcome! Please provide your phone number: ")
     
-    # Step 1: Phone number input
     try:
         # Wait max 5 minutes (session TTL) for phone number
         phone_number_raw = await wait_for_message_with_timeout(websocket, timeout=session_manager.EXPIRY_SECONDS)
@@ -84,7 +91,7 @@ async def websocket_chat(websocket: WebSocket):
         f"Hello Customer {customer_id[:8]}! Your session ID is {session_id[:8]}"
     )
 
-    # Step 3: Wait for KB upload
+    """# Step 3: Wait for KB upload
     await websocket.send_text("Please upload your Knowledge Base for this session: ")
     try:
         kb_raw = await wait_for_message_with_timeout(websocket, timeout=session_manager.EXPIRY_SECONDS)
@@ -99,13 +106,20 @@ async def websocket_chat(websocket: WebSocket):
         log.error(f"Failed Kb upload: {e}")
         await websocket.send_text("Error uploading KB. Please try again.")
         await websocket.close()
-        return
+        return"""
 
+    # Step 3: Fetch company KB directly
+    try:
+        company_kb = await company_kb_manager.get_kb(company_id)
+        if company_kb:
+            await context_manager.add_message(session_id, "system", company_kb)
+            log.info(f"Loaded company KB into session for {company_id}")
+    except Exception as e:
+        log.error(f"Failed to load company KB: {e}")
 
     # Step 4: Conversation Loop
     try:
         while True:
-            
             try:
                 data = await wait_for_message_with_timeout(websocket)
 
@@ -116,16 +130,21 @@ async def websocket_chat(websocket: WebSocket):
                 log.info("Session timeout.")
                 break
             
-            log.info(f"Customer {customer_id} | Session {session_id} | Msg: {data}")
+            # log.info(f"Customer {customer_id} | Session {session_id} | Msg: {data}")
 
             # Save user msg
             await context_manager.add_message(session_id, "user", data)
 
             # Get conversation history + session KB
-            history = await context_manager.get_history(session_id)
+            history = await context_manager.get_history(session_id, company_id=company_id)
 
             # Await OpenAI client
-            reply = await openai_client.generate_response(history)
+            try:
+                reply = await openai_client.generate_response(history)
+            except Exception as e:
+                log.error(f"OpenAI generation failed: {e}")
+                await websocket.send_text("Sorry, something went wrong generating a response.")
+                continue
             """try:
                 async for token in openai_client.generate_streaming_response(history):
                     
@@ -164,7 +183,7 @@ async def websocket_chat(websocket: WebSocket):
     finally:
         try:
             end_time = datetime.now(timezone.utc)
-            raw_history = await context_manager.get_history(session_id)
+            raw_history = await context_manager.get_history(session_id, company_id=company_id)
 
             messages_for_save =[]
             for raw in raw_history:
@@ -184,6 +203,7 @@ async def websocket_chat(websocket: WebSocket):
             phone_for_record = customer_doc.get("phone_number") if customer_doc else normalized_phone
 
             conversation_id = await conversation_manager.save_conversation(
+                company_id=company_id,
                 customer_id=customer_id,
                 session_id=session_id,
                 phone_number=phone_for_record,

@@ -26,6 +26,7 @@ class ConversationManager:
             self,
             customer_id: str,
             session_id: str,
+            company_id: str,
             phone_number: Optional[str],
             messages: List[Dict],
             start_time: datetime,
@@ -42,6 +43,7 @@ class ConversationManager:
             conversation_id=conversation_id,
             customer_id=customer_id,
             session_id=session_id,
+            company_id=company_id,
             phone_number=phone_number,
             messages=msg_items,
             start_time=start_time,
@@ -52,7 +54,13 @@ class ConversationManager:
         doc = conv.model_dump()
         await self.collection.insert_one(doc)
 
-        logger.bind(customer_id=customer_id, session_id=session_id, conversation_id=conversation_id).info("Saved conversation transcript.")
+        logger.bind(
+            company_id=company_id,
+            customer_id=customer_id, 
+            session_id=session_id, 
+            conversation_id=conversation_id
+        ).info("Saved conversation transcript.")
+        
         return conversation_id
     
 async def get_conversation_for_customer(self, customer_id: str, limit: int=50) -> List[Dict]:

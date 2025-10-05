@@ -19,6 +19,7 @@ class Conversation(BaseModel):
     conversation_id: str = Field(..., description="UUID for the conversation")
     customer_id: str = Field(..., description="Customer UUID")
     session_id: str = Field(..., description="Session UUID")
+    company_id: Optional[str] = None
     phone_number: Optional[str] = Field(None, description="Normalized phone number (E.164)")
     messages: List[MessageItem] = Field(..., description="Ordered list of messages in the conversation")
     start_time: datetime = Field(..., description="Session start time (UTC)")

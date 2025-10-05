@@ -40,10 +40,11 @@ class ContextManager:
         log = logger.bind(session_id=session_id)
         log.info(f"Added KB entry to session")
 
-    async def get_history(self, session_id: str) -> List[Dict]:
+    async def get_history(self, session_id: str, company_id: str = None) -> List[Dict]:
         """
         Retrieve full conversation history for a session.
         Returns a list of dicts like: [{"role": "user", "message": "..."}].
+        If company ID is provided prepend compony KB to history
         """
 
         key = f"{self.CONTEXT_PREFIX}{session_id}"
@@ -58,13 +59,21 @@ class ContextManager:
             except Exception:
                 logger.bind(session_id=session_id).warning("Malformed message in context, skipping")
 
-        kb_key = f"{self.KB_PREFIX}{session_id}"
+        if company_id:
+            kb_key = f"{self.KB_PREFIX}:company:{company_id}"
+            kb_entries = await redis_client.lrange(kb_key, 0, -1)
+            for kb in kb_entries:
+                if isinstance(kb, bytes):
+                    kb = kb.decode("utf-8")
+                history.insert(0, {"role": "system", "message": kb})
+
+        """kb_key = f"{self.KB_PREFIX}{session_id}"
         kb_entries = await redis_client.lrange(kb_key, 0, -1)
         for kb in kb_entries:
             if isinstance(kb, bytes):
                 kb = kb.decode("utf-8")
 
-            history.insert(0, {"role": "system", "message": kb})
+            history.insert(0, {"role": "system", "message": kb})"""
 
         logger.bind(session_id=session_id).info(f"Fetched {len(history)} messages for session.")
         return history
